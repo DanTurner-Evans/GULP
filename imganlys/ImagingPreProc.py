@@ -18,6 +18,24 @@ from os.path import sep, exists
 from matplotlib import pyplot as plt
 import math
 import pickle
+from datetime import datetime
+import tkinter as tk
+from tkinter import filedialog
+
+
+def loadFileNames():
+    """Prompt user to select one or multiple files
+
+    Returns:
+        list: list of filenames of trials
+    """
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", 1)
+
+    trial_file_nms = filedialog.askopenfilenames(title="Select files")
+    return trial_file_nms
 
 def loadTrialInfo(rootDirs):
     """
@@ -66,7 +84,6 @@ def loadTif(path):
 
     return [stack4d, nCh, nDiscardFBFrames, fpv]
 
-
 def tifMetadata(path):
     """ Load Scan Image tiff metadata from a Scan Image tiff reader object
     """
@@ -78,10 +95,10 @@ def tifMetadata(path):
     if not metadat:
         with tf.TiffFile(path) as tif:
             imagej_metadata = tif.imagej_metadata
-            
+
             SizeC = int(imagej_metadata.get('channels', 1))
-            SizeT = int(imagej_metadata['frames'])
-            SizeZ = int(imagej_metadata['images'] / SizeC / SizeT)
+            SizeT = int(imagej_metadata.get('frames', 1))
+            SizeZ = int(imagej_metadata.get('images', 1) / SizeC / SizeT)
 
             nCh = SizeC
             discardFBFrames = None
@@ -117,6 +134,48 @@ def tifMetadata(path):
                 nVols = int(line.split('=')[-1].strip())
 
     return [nCh, discardFBFrames, nDiscardFBFrames, fpv, nVols]
+
+def getDate(path):
+    """Get the date for a tiff file
+
+    Args:
+        path (str): path to tiff file
+
+    Returns:
+        datetime: time tiff was captured
+    """
+    # Load metadata
+    with tf.TiffFile(path) as tif:
+        imagej_metadata = tif.imagej_metadata
+
+    # Search metadata for date
+    info = imagej_metadata.get('Info', None)
+    searchstr = "[Acquisition Parameters Common] ImageCaputreDate ="
+    date_str = None
+    for line in info.splitlines():
+        if searchstr in line:
+            date_str = line.split("=")[-1].strip()
+            date_str = date_str.replace('\'', '')
+            break
+    assert date_str is not None
+
+    date = datetime.fromisoformat(date_str)
+
+    return date
+
+def getFmInterval(path):
+    """Get the frame interval of a tiff file
+
+    Args:
+        path (str): path to tiff file
+
+    Returns:
+        float: frame interval
+    """
+    with tf.TiffFile(path) as tif:
+        imagej_metadata = tif.imagej_metadata
+    fm_interval = float(imagej_metadata.get("finterval"))
+    return fm_interval
 
 def plotMeanPlane(stack, col = 0, ncols = 4):
     """
@@ -382,6 +441,35 @@ def DFoF(rawF):
 
     return DF
 
+def DFoFfromfirstfms(rawF, fm_interval, baseline_sec=10):
+    """Calculate the DF/F given a raw fluorescence signal
+    The baseline fluorescence is the mean of first 10 seconds of florescence
+
+    Args:
+        rawF (NDArray[float64]): ndarray of raw florescence over frame and roi.
+                                 shape = (# of frames, # of ROI's)
+        fm_interval (float): Time it takes to capture one frame (in seconds per frame)
+        baseline_sec (float): How long into the trial to get the baseline from
+
+    Returns:
+        NDArray[float64]: ndarray of delta florescence over baseline florescence per frame and roi.
+                          shape = (# of frames, # of ROI's)
+    """
+
+    # Initialize the array to hold the DF/F data
+    DF = np.zeros(rawF.shape)
+
+    # rawF axes: [frames, rois]
+    baseline_sec = 10
+    baseline_end_frame = round(baseline_sec / fm_interval)
+
+    # Calculate the DF/F for each ROI
+    for r in range(0, rawF.shape[1]):
+        Fbaseline = rawF[0:baseline_end_frame, r].mean()
+        DF[:, r] = rawF[:, r] / Fbaseline - 1
+
+    return DF
+
 def getRingROIs(viewer, stackMean):
     """ Get an ellipse and divide it into 16 sections
     """
@@ -484,6 +572,51 @@ def saveDFDat(fileNm, expt, expt_dat):
     allDat[expt] = expt_dat
 
     # Save the data
-    outfile = open(fileNm, 'wb')
-    pickle.dump(allDat, outfile)
-    outfile.close()
+    with open(fileNm, 'wb') as outfile:
+        pickle.dump(allDat, outfile)
+
+def formatDate(year, month):
+    """Formats year and month together into form YYYY_MM
+
+    Args:
+        year (int)
+        month (int)
+
+    Returns:
+        str: formated year and month string
+    """
+    formatted_date = f"{year}_{month:02d}"
+    return formatted_date
+
+def getPicklePath(folderNm, trialNm):
+    """Create path for pickle file. 
+    Under the folder given, the pickle file is stored in a year and month folder (year_month)
+
+    Args:
+        folder (str): path to folder to store pickle file in
+        trialNm (str): filename of trial
+
+    Returns:
+        str: path of pickle file
+    """
+    trial_date = getDate(trialNm)
+    year_month = formatDate(trial_date.year, trial_date.month)
+    dirPath = os.path.join(folderNm, year_month)
+
+    baseNm = os.path.basename(trialNm).split(".")[0] + ".pickle"
+    fullPath = os.path.join(dirPath, baseNm)
+    return fullPath
+
+def saveTrials(folderNm, expt_dat):
+    # Given a dictonary of trials,
+    # save each trial in a seperate pickle file
+    for trialNm, trial in expt_dat.items():
+        trial_date = getDate(trialNm)
+        year_month = f"{trial_date.year}_{trial_date.month:02d}"
+        dirPath = os.path.join(folderNm, year_month)
+        os.makedirs(dirPath, exist_ok=True)
+
+        basename = os.path.basename(trialNm).split(".")[0] + ".pickle"
+        fullPath = os.path.join(dirPath, basename)
+        with open(fullPath, 'wb') as outfile:
+            pickle.dump(trial, outfile)
