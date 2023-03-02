@@ -390,41 +390,31 @@ def FfromROIsDiv(stack, all_masks):
 
     return rawF
 
-def FfromROIs(stack, allMasks):
-    """ Calculate the raw fluorescence in each ROI in all ROIS on the given stack
+def FfromROIs(stack, allMasks, frameIdx=1, ch=0):
+    """Calculate the raw fluorescence in each ROI in all ROIS on the given stack
+
+    Args:
+        stack (NDArray[float64]): Image stack.
+        allMasks (NDArray): list of masks.
+        frameIdx (int, optional): Index of stack shape that stores frames. Defaults to 1.
+        ch (int, optional): Which channel to calculate florescence from. Defaults to 0.
+
+    Returns:
+        NDArray[float64]: ndarray raw florescence per frame and roi. shape = (# of frames, # of ROI's)
     """
 
     # Initialie the array to hold the fluorescence data
-    rawF = np.zeros((stack.shape[0],len(allMasks)))
+    rawF = np.zeros((stack.shape[frameIdx],len(allMasks)))
 
     # Step through each frame in the stack
-    for fm in range(0,stack.shape[0]):
-        fmNow = stack[fm,:,:]
+    for fm in range(0,stack.shape[frameIdx]):
+        fmNow = stack[0, fm, ch, :, :]
 
         # Find the sum of the fluorescence in each ROI for the given frame
         for r in range(0,len(allMasks)):
-            rawF[fm,r] = np.multiply(fmNow, np.transpose(allMasks[r])).sum()
+            rawF[fm,r] = np.multiply(fmNow, allMasks[r]).sum()
 
     return rawF
-
-def FfromROIsDiv(stack, allMasks):
-    """ Calculate the raw fluorescence in each ROI in all ROIS on the given stack
-    """
-
-    # Initialie the array to hold the fluorescence data
-    rawF = np.zeros((stack.shape[0],len(allMasks)))
-
-    # Step through each frame in the stack
-    for fm in range(0,stack.shape[0]):
-        fmNow = stack[fm,:,:,:]
-
-        # Find the sum of the fluorescence in each ROI for the given frame
-        for r in range(0,len(allMasks)):
-            v = allMasks[allMasks['roi'] == r]['layer'][0]
-            rawF[fm,r] = np.multiply(fmNow[v,:,:], np.transpose(allMasks[allMasks['roi'] == r]['mask'][0])).sum()
-
-    return rawF
-
 
 def DFoF(rawF):
     """ Calculate the DF/F given a raw fluorescence signal
@@ -550,6 +540,128 @@ def getEBROI(viewer, stack):
     allMasks.append(cv.fillConvexPoly(mask,pts,1))
 
     return [EBOutline.data, pts, allMasks]
+
+def incr_bbox(bounding_box, scale_factor):
+    """Scale a bounding box keeping it centered at the same spot
+
+    Args:
+        bounding_box (ndarray): Bounding box of shape (2,2): [x or y, min or max]
+        scale_factor (float): Amount to scale each side of the bounding box by
+
+    Returns:
+        NDArray[float64]: scaled bounding box
+    """
+    view_box = np.empty(shape=(2, 2))
+    for dim in range(2):
+        for lim in range(2):
+            if lim == 0:  # min
+                sign = -1
+            if lim == 1:  # max
+                sign = 1
+            length = bounding_box[dim, 1] - bounding_box[dim, 0]
+            scale_amount = sign * (scale_factor - 1) / 2 * length
+            view_box[dim, lim] = bounding_box[dim, lim] + scale_amount
+    return view_box
+
+def get_bbox(rois, scale_factor=1.5):
+    """Given a list of rois, return a bounding box, a scale factor of 1 is a tight box
+
+    Args:
+        rois (list[ndarray]): List of rois, each roi is an ndarray of the points that make up the roi.
+        scale_factor (float, optional): Amount to scale each side of the bounding box by. Defaults to 1.5.
+
+    Returns:
+        NDArray[float64]: Bounding box of shape (2,2): [x or y, min or max]
+    """
+    XCOL = 0
+    YCOL = 1
+    # roi_bound axes: [roi, x or y, min or max]
+    roi_bounds = np.empty(shape=(len(rois), 2, 2))
+
+    # Get min and max for each roi x and y
+    for i, r in enumerate(rois):
+        roi_bounds[i][0][0], roi_bounds[i][1][0] = r.min(axis=0)[XCOL : YCOL + 1]
+        roi_bounds[i][0][1], roi_bounds[i][1][1] = r.max(axis=0)[XCOL : YCOL + 1]
+
+    # Get the coords for the bounding box, using upper left corner to lower right
+    # bounding_box axes: [x or y, min or max]
+    bounding_box = np.empty(shape=(2, 2))
+    bounding_box[:, 0] = roi_bounds[:, :, 0].min(axis=0)
+    bounding_box[:, 1] = roi_bounds[:, :, 1].max(axis=0)
+
+    # Create a larger bounding box to not cut off parts of the PB
+    view_box = incr_bbox(bounding_box, scale_factor)
+    return view_box
+
+def plot_colorbar(fig, cbaraxes, F_plot, F_lims, cbarlabel):
+    """Plot the colorbar for the given F_plot
+
+    Args:
+        fig (~matplotlib.figure.Figure): Figure to add colorbar to
+        cbaraxes (list): shape of cbar in format [x, y, width, height]
+        F_plot (AxesImage): Plot of florescence
+        F_lims (list): min and max florescence values
+        cbarlabel (str): label of colorbar
+    """
+    # Plot colorbar
+    cbar_ax = fig.add_axes(cbaraxes)
+    cbar = fig.colorbar(F_plot, cax=cbar_ax)
+    cbar.set_ticks(F_lims)
+    if (F_lims[0] > 10**2) or (F_lims[1] > 10**2):
+        F_lims_str = [f"{lim:g}" for lim in F_lims]
+    else:
+        F_lims_str = [f"{lim:.2f}" for lim in F_lims]
+    cbar.ax.set_yticklabels(F_lims_str)
+    cbar.set_label(cbarlabel, labelpad=-25)
+
+
+def plot_florescence(
+        F,panel,cmap,aspect,F_lims,roi_num,fm_interval,
+        withcbar=False,fig=None,cbaraxes=None,cbarlabel=None,
+        ):
+    """Plot the florescence of F
+    if with cbar is true, need to provide fig, and axes of cbar
+    Note: Plotting fails if trial is too long, maximum length is 18 minutes
+
+    Args:
+        F (NDArray[float64]): ndarray of florescence, with shape (# of ROI's, # of frames)
+        panel (Axes): Axes to draw plot in.
+        cmap (str or Colormap): Colormap to use.
+        aspect (float): Vertical to horizontal ratio of heatmap pixel, of form aspect:1.
+        F_lims (list): Min and max florescence values.
+        fm_interval (float): Time it takes to capture one frame (in seconds per frame).
+        withcbar (bool, optional): Set to true to add a colorbar. Defaults to False.
+        fig (~matplotlib.figure.Figure, optional): Figure to add colorbar to. Defaults to None.
+        cbaraxes (list, optional): shape of cbar in format [x, y, width, height]. Defaults to None.
+        cbarlabel (str, optional): label of colorbar. Defaults to None.
+    """
+    # Plot florescence
+    F_plot = panel.imshow(
+        F,
+        cmap=cmap,
+        interpolation="nearest",
+        aspect=aspect,
+        vmin=F_lims[0],
+        vmax=F_lims[1],
+    )
+    # panel.title.set_text(title)
+    num_frames = F.shape[1]
+    panel.set_xlabel("sec", labelpad=0)
+    panel.set_xticks(
+        [int(sec / fm_interval) 
+         for sec in np.arange(0, num_frames * fm_interval, 5)],
+        [f"{sec:.0f}" if sec % 2 == 0 else "" 
+         for sec in np.arange(0, num_frames * fm_interval, 5)],
+    )
+    panel.set_ylabel("ROI", labelpad=-2)
+    roi_num = F.shape[0]
+    panel.set_yticks(
+        [i for i in range(roi_num) if i % 2 == 0],
+        [i + 1 for i in range(roi_num) if i % 2 == 0],
+    )
+    # Plot colorbar
+    if withcbar:
+        plot_colorbar(fig, cbaraxes, F_plot, F_lims, cbarlabel)
 
 def saveDFDat(fileNm, expt, expt_dat):
     """
