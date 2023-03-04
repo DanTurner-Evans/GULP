@@ -606,17 +606,21 @@ def plot_colorbar(fig, cbaraxes, F_plot, F_lims, cbarlabel):
     # Plot colorbar
     cbar_ax = fig.add_axes(cbaraxes)
     cbar = fig.colorbar(F_plot, cax=cbar_ax)
-    cbar.set_ticks(F_lims)
-    if (F_lims[0] > 10**2) or (F_lims[1] > 10**2):
-        F_lims_str = [f"{lim:g}" for lim in F_lims]
+    if ((F_lims[0] > 0) and (F_lims[1] > 0)) or (F_lims[0] < 0) and (F_lims[1] < 0):
+        ticks = [F_lims[0], F_lims[1]]
     else:
-        F_lims_str = [f"{lim:.2f}" for lim in F_lims]
+        ticks = [F_lims[0], 0, F_lims[1]]
+    cbar.set_ticks(ticks)
+    if (F_lims[0] > 10**2) or (F_lims[1] > 10**2):
+        F_lims_str = [f"{lim:g}" for lim in ticks]
+    else:
+        F_lims_str = [f"{lim:.2f}" for lim in ticks]
     cbar.ax.set_yticklabels(F_lims_str)
     cbar.set_label(cbarlabel, labelpad=-25)
 
 
 def plot_florescence(
-        F,panel,cmap,aspect,F_lims,roi_num,fm_interval,
+        F,panel,cmap,aspect,roi_num,fm_interval,F_lims,norm=None,
         withcbar=False,fig=None,cbaraxes=None,cbarlabel=None,
         ):
     """Plot the florescence of F
@@ -628,7 +632,7 @@ def plot_florescence(
         panel (Axes): Axes to draw plot in.
         cmap (str or Colormap): Colormap to use.
         aspect (float): Vertical to horizontal ratio of heatmap pixel, of form aspect:1.
-        F_lims (list): Min and max florescence values.
+        norm (TwoSlopeNorm): TwoSlopeNorm object with range of data.
         fm_interval (float): Time it takes to capture one frame (in seconds per frame).
         withcbar (bool, optional): Set to true to add a colorbar. Defaults to False.
         fig (~matplotlib.figure.Figure, optional): Figure to add colorbar to. Defaults to None.
@@ -641,8 +645,7 @@ def plot_florescence(
         cmap=cmap,
         interpolation="nearest",
         aspect=aspect,
-        vmin=F_lims[0],
-        vmax=F_lims[1],
+        norm=norm
     )
     # panel.title.set_text(title)
     num_frames = F.shape[1]
@@ -700,7 +703,7 @@ def formatDate(year, month):
     formatted_date = f"{year}_{month:02d}"
     return formatted_date
 
-def getPicklePath(folderNm, trialNm):
+def getPicklePath(trialNm, folderNm):
     """Create path for pickle file. 
     Under the folder given, the pickle file is stored in a year and month folder (year_month)
 
@@ -719,7 +722,21 @@ def getPicklePath(folderNm, trialNm):
     fullPath = os.path.join(dirPath, baseNm)
     return fullPath
 
-def saveTrials(folderNm, expt_dat):
+def loadProcData(proc_data_fn):
+    """Return processed data
+
+    Args:
+        proc_data_fn (str): path to processed data
+
+    Returns:
+        dict: dictionary of trial data
+    """
+    assert os.path.isfile(proc_data_fn)
+    with open(proc_data_fn, 'rb') as infile:
+        data = pickle.load(infile)
+    return data
+
+def saveTrials(expt_dat, folderNm):
     # Given a dictonary of trials,
     # save each trial in a seperate pickle file
     for trialNm, trial in expt_dat.items():
