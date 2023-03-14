@@ -2,8 +2,7 @@ from ScanImageTiffReader import ScanImageTiffReader
 import tifffile as tf
 import numpy as np
 from skimage.registration import phase_cross_correlation
-from scipy.ndimage.filters import gaussian_filter
-from scipy.ndimage import fourier_shift
+from scipy.ndimage import fourier_shift, gaussian_filter
 import numpy as np
 import math
 import napari
@@ -12,6 +11,7 @@ SETTINGS.application.ipy_interactive = False
 import cv2 as cv
 import time
 import pandas as pd
+from pathlib import Path
 import os
 from os import listdir
 from os.path import sep, exists
@@ -23,7 +23,7 @@ import tkinter as tk
 from tkinter import filedialog
 
 
-def loadFileNames():
+def loadFileNames(single_file=False):
     """Prompt user to select one or multiple files
 
     Returns:
@@ -34,7 +34,10 @@ def loadFileNames():
     root.withdraw()
     root.attributes("-topmost", 1)
 
-    trial_file_nms = filedialog.askopenfilenames(title="Select files")
+    if single_file:
+        trial_file_nms = filedialog.askopenfilename(title="Select files")
+    else:
+        trial_file_nms = filedialog.askopenfilenames(title="Select files")
     return trial_file_nms
 
 def loadTrialInfo(rootDirs):
@@ -139,7 +142,7 @@ def getDate(path):
     """Get the date for a tiff file
 
     Args:
-        path (str): path to tiff file
+        path (str or pathlib.Path): path to tiff file
 
     Returns:
         datetime: time tiff was captured
@@ -607,16 +610,19 @@ def plot_colorbar(fig, cbaraxes, F_plot, F_lims, cbarlabel):
     cbar_ax = fig.add_axes(cbaraxes)
     cbar = fig.colorbar(F_plot, cax=cbar_ax)
     if ((F_lims[0] > 0) and (F_lims[1] > 0)) or (F_lims[0] < 0) and (F_lims[1] < 0):
+        # Doesn't pass through 0 (eg. raw florescence)
         ticks = [F_lims[0], F_lims[1]]
+        cbar.set_label(cbarlabel, labelpad=-25)
     else:
+        # Passes through 0 (eg. delta florescence)
         ticks = [F_lims[0], 0, F_lims[1]]
+        cbar.set_label(cbarlabel, labelpad=-12)
     cbar.set_ticks(ticks)
     if (F_lims[0] > 10**2) or (F_lims[1] > 10**2):
-        F_lims_str = [f"{lim:g}" for lim in ticks]
+        tick_labels = [f"{lim:g}" for lim in ticks]
     else:
-        F_lims_str = [f"{lim:.2f}" for lim in ticks]
-    cbar.ax.set_yticklabels(F_lims_str)
-    cbar.set_label(cbarlabel, labelpad=-25)
+        tick_labels = [f"{lim:.2g}" for lim in ticks]
+    cbar.ax.set_yticklabels(tick_labels)
 
 
 def plot_florescence(
@@ -662,6 +668,7 @@ def plot_florescence(
         [i for i in range(roi_num) if i % 2 == 0],
         [i + 1 for i in range(roi_num) if i % 2 == 0],
     )
+    panel.invert_yaxis()
     # Plot colorbar
     if withcbar:
         plot_colorbar(fig, cbaraxes, F_plot, F_lims, cbarlabel)
@@ -718,8 +725,9 @@ def getPicklePath(trialNm, folderNm):
     year_month = formatDate(trial_date.year, trial_date.month)
     dirPath = os.path.join(folderNm, year_month)
 
-    baseNm = os.path.basename(trialNm).split(".")[0] + ".pickle"
-    fullPath = os.path.join(dirPath, baseNm)
+    timestamp = trial_date.strftime("%Y%m%d-%H%M")
+    baseNm = timestamp + '_' + os.path.basename(trialNm).split('.')[0] + ".pickle"
+    fullPath = Path(dirPath, baseNm)
     return fullPath
 
 def loadProcData(proc_data_fn):
@@ -737,15 +745,16 @@ def loadProcData(proc_data_fn):
     return data
 
 def saveTrials(expt_dat, folderNm):
-    # Given a dictonary of trials,
+    # Given a dictionary of trials,
     # save each trial in a seperate pickle file
     for trialNm, trial in expt_dat.items():
         trial_date = getDate(trialNm)
-        year_month = f"{trial_date.year}_{trial_date.month:02d}"
+        year_month = formatDate(trial_date.year, trial_date.month)
         dirPath = os.path.join(folderNm, year_month)
         os.makedirs(dirPath, exist_ok=True)
 
-        basename = os.path.basename(trialNm).split(".")[0] + ".pickle"
+        timestamp = trial_date.strftime("%Y%m%d-%H%M")
+        basename = timestamp + '_' + os.path.basename(trialNm).split('.')[0] + ".pickle"
         fullPath = os.path.join(dirPath, basename)
         with open(fullPath, 'wb') as outfile:
             pickle.dump(trial, outfile)
