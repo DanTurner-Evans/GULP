@@ -180,6 +180,33 @@ def getFmInterval(path):
     fm_interval = float(imagej_metadata.get("finterval"))
     return fm_interval
 
+def getPixelDims(path):
+    # Load metadata
+    with tf.TiffFile(path) as tif:
+        imagej_metadata = tif.imagej_metadata
+
+    # Search metadata for pixel dimensions
+    info = imagej_metadata.get('Info', None)
+    for line in info.splitlines():
+        if '[Reference Image Parameter] WidthConvertValue' in line:
+            pixel_width = line.split("=")[-1].strip()
+
+        if '[Reference Image Parameter] WidthUnit' in line:
+            width_unit = line.split("=")[-1].strip()
+
+        if '[Reference Image Parameter] HeightConvertValue' in line:
+            pixel_height = line.split("=")[-1].strip()
+
+        if '[Reference Image Parameter] HeightUnit' in line:
+            height_unit = line.split("=")[-1].strip()
+
+    pixel_dims = {'pixel_width': pixel_width,
+                  'width_unit': width_unit,
+                  'pixel_height': pixel_height,
+                  'height_unit': height_unit,}
+
+    return pixel_dims
+
 def plotMeanPlane(stack, col = 0, ncols = 4):
     """
     Plot the mean of each plane in a stack in a plot with ncol columns
@@ -596,19 +623,19 @@ def get_bbox(rois, scale_factor=1.5):
     view_box = incr_bbox(bounding_box, scale_factor)
     return view_box
 
-def plot_colorbar(fig, cbaraxes, F_plot, F_lims, cbarlabel):
+def plot_colorbar(cax, F_plot, F_lims, cbarlabel):
     """Plot the colorbar for the given F_plot
 
     Args:
         fig (~matplotlib.figure.Figure): Figure to add colorbar to
-        cbaraxes (list): shape of cbar in format [x, y, width, height]
+        cax (Axes): Axes to plot colorbar in
         F_plot (AxesImage): Plot of florescence
         F_lims (list): min and max florescence values
         cbarlabel (str): label of colorbar
     """
     # Plot colorbar
-    cbar_ax = fig.add_axes(cbaraxes)
-    cbar = fig.colorbar(F_plot, cax=cbar_ax)
+    fig = cax.get_figure()
+    cbar = fig.colorbar(F_plot, cax=cax)
     if ((F_lims[0] > 0) and (F_lims[1] > 0)) or (F_lims[0] < 0) and (F_lims[1] < 0):
         # Doesn't pass through 0 (eg. raw florescence)
         ticks = [F_lims[0], F_lims[1]]
@@ -626,11 +653,11 @@ def plot_colorbar(fig, cbaraxes, F_plot, F_lims, cbarlabel):
 
 
 def plot_florescence(
-        F,panel,cmap,aspect,roi_num,fm_interval,F_lims,norm=None,
-        withcbar=False,fig=None,cbaraxes=None,cbarlabel=None,
+        F, panel, cmap, aspect, fm_interval, F_lims, norm=None,
+        withcbar=False, cax=None, cbarlabel=None,
         ):
     """Plot the florescence of F
-    if with cbar is true, need to provide fig, and axes of cbar
+    if with cbar is true, need to provide axes of cbar
     Note: Plotting fails if trial is too long, maximum length is 18 minutes
 
     Args:
@@ -641,37 +668,32 @@ def plot_florescence(
         norm (TwoSlopeNorm): TwoSlopeNorm object with range of data.
         fm_interval (float): Time it takes to capture one frame (in seconds per frame).
         withcbar (bool, optional): Set to true to add a colorbar. Defaults to False.
-        fig (~matplotlib.figure.Figure, optional): Figure to add colorbar to. Defaults to None.
-        cbaraxes (list, optional): shape of cbar in format [x, y, width, height]. Defaults to None.
+        cbaraxes (Axes, optional): Axes to plot colorbar in. Defaults to None.
         cbarlabel (str, optional): label of colorbar. Defaults to None.
     """
+    num_rois, num_frames = F.shape
     # Plot florescence
+    extent = (0, num_frames * fm_interval,
+              0, num_rois)
     F_plot = panel.imshow(
         F,
         cmap=cmap,
-        interpolation="nearest",
+        interpolation="none",
         aspect=aspect,
-        norm=norm
+        norm=norm,
+        origin='lower',
+        extent=extent
     )
     # panel.title.set_text(title)
     num_frames = F.shape[1]
-    panel.set_xlabel("sec", labelpad=0)
-    panel.set_xticks(
-        [int(sec / fm_interval) 
-         for sec in np.arange(0, num_frames * fm_interval, 5)],
-        [f"{sec:.0f}" if sec % 2 == 0 else "" 
-         for sec in np.arange(0, num_frames * fm_interval, 5)],
-    )
     panel.set_ylabel("ROI", labelpad=-2)
-    roi_num = F.shape[0]
     panel.set_yticks(
-        [i for i in range(roi_num) if i % 2 == 0],
-        [i + 1 for i in range(roi_num) if i % 2 == 0],
+        [i for i in range(num_rois) if i % 2 == 0],
+        [i + 1 for i in range(num_rois) if i % 2 == 0],
     )
-    panel.invert_yaxis()
     # Plot colorbar
     if withcbar:
-        plot_colorbar(fig, cbaraxes, F_plot, F_lims, cbarlabel)
+        plot_colorbar(cax, F_plot, F_lims, cbarlabel)
 
 def saveDFDat(fileNm, expt, expt_dat):
     """
