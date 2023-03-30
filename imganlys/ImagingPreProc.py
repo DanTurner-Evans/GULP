@@ -71,7 +71,7 @@ def loadTif(path):
     """
 
     # Make a tiff reader object
-    mytiffreader = ScanImageTiffReader(path)
+    mytiffreader = ScanImageTiffReader(str(path))
 
     # Get the metadata
     [nCh, discardFBFrames, nDiscardFBFrames, fpv, nVols] = tifMetadata(path)
@@ -91,7 +91,7 @@ def tifMetadata(path):
     """ Load Scan Image tiff metadata from a Scan Image tiff reader object
     """
 
-    mytiffreader = ScanImageTiffReader(path)
+    mytiffreader = ScanImageTiffReader(str(path))
     metadat = mytiffreader.metadata()
 
     # If metadat is empty, it is not a ScanImage tiff file so use a general tiff metadata reader
