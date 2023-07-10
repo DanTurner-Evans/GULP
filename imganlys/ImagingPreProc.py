@@ -686,9 +686,9 @@ def plot_florescence(
     )
     # panel.title.set_text(title)
     num_frames = F.shape[1]
-    panel.set_ylabel("ROI", labelpad=-2)
+    panel.set_ylabel("ROI")
     panel.set_yticks(
-        [i for i in range(num_rois) if i % 2 == 0],
+        [i+0.5 for i in range(num_rois) if i % 2 == 0],
         [i + 1 for i in range(num_rois) if i % 2 == 0],
     )
     # Plot colorbar
@@ -745,10 +745,10 @@ def getPicklePath(trialNm, folderNm):
     """
     trial_date = getDate(trialNm)
     year_month = formatDate(trial_date.year, trial_date.month)
-    dirPath = os.path.join(folderNm, year_month)
+    dirPath = Path(folderNm, year_month)
 
     timestamp = trial_date.strftime("%Y%m%d-%H%M")
-    baseNm = timestamp + '_' + os.path.basename(trialNm).split('.')[0] + ".pickle"
+    baseNm = timestamp + '_' + Path(trialNm).stem + ".pickle"
     fullPath = Path(dirPath, baseNm)
     return fullPath
 
@@ -776,7 +776,7 @@ def saveTrials(expt_dat, folderNm):
         os.makedirs(dirPath, exist_ok=True)
 
         timestamp = trial_date.strftime("%Y%m%d-%H%M")
-        basename = timestamp + '_' + os.path.basename(trialNm).split('.')[0] + ".pickle"
+        basename = timestamp + '_' + Path(trialNm).stem + ".pickle"
         fullPath = os.path.join(dirPath, basename)
         with open(fullPath, 'wb') as outfile:
             pickle.dump(trial, outfile)
